@@ -15,7 +15,8 @@ doctorRoutes.use(authenticate, authorize("doctor"));
 const getDoctor = async (userId: string) => {
   const doctor = await prisma.doctor.findUnique({ where: { userId } });
   if (!doctor) throw new ApiError(404, "Doctor profile not found");
-  if (!doctor.isApproved) throw new ApiError(403, "Doctor account is pending approval");
+  if (!doctor.isApproved)
+    throw new ApiError(403, "Doctor account is pending approval");
   return doctor;
 };
 
@@ -26,24 +27,33 @@ doctorRoutes.get(
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const [todayCount, activePatients, pendingRefills, recentPrescriptions] = await Promise.all([
-      prisma.prescription.count({
-        where: { doctorId: doctor.id, createdAt: { gte: today } },
-      }),
-      prisma.prescription.groupBy({
-        by: ["patientId"],
-        where: { doctorId: doctor.id, status: "active", expiryDate: { gte: new Date() } },
-      }),
-      prisma.refillAlert.count({
-        where: { doctorId: doctor.id, alertType: "expiry_warning", isAcknowledged: false },
-      }),
-      prisma.prescription.findMany({
-        where: { doctorId: doctor.id },
-        include: { patient: { include: { user: true } }, items: true },
-        orderBy: { createdAt: "desc" },
-        take: 5,
-      }),
-    ]);
+    const [todayCount, activePatients, pendingRefills, recentPrescriptions] =
+      await Promise.all([
+        prisma.prescription.count({
+          where: { doctorId: doctor.id, createdAt: { gte: today } },
+        }),
+        prisma.prescription.groupBy({
+          by: ["patientId"],
+          where: {
+            doctorId: doctor.id,
+            status: "active",
+            expiryDate: { gte: new Date() },
+          },
+        }),
+        prisma.refillAlert.count({
+          where: {
+            doctorId: doctor.id,
+            alertType: "expiry_warning",
+            isAcknowledged: false,
+          },
+        }),
+        prisma.prescription.findMany({
+          where: { doctorId: doctor.id },
+          include: { patient: { include: { user: true } }, items: true },
+          orderBy: { createdAt: "desc" },
+          take: 5,
+        }),
+      ]);
 
     res.json({
       totalPrescriptionsToday: todayCount,
@@ -72,8 +82,14 @@ doctorRoutes.get(
           : undefined,
       },
       include: {
-        user: { select: { id: true, fullName: true, email: true, phone: true } },
-        prescriptions: { orderBy: { createdAt: "desc" }, take: 5, include: { items: true } },
+        user: {
+          select: { id: true, fullName: true, email: true, phone: true },
+        },
+        prescriptions: {
+          orderBy: { createdAt: "desc" },
+          take: 5,
+          include: { items: true },
+        },
       },
       take: 15,
     });
@@ -102,59 +118,66 @@ doctorRoutes.post(
   asyncHandler(async (req, res) => {
     const doctor = await getDoctor(req.user!.id);
     const body = createPrescriptionSchema.parse(req.body);
-    const patient = await prisma.patient.findUnique({ where: { id: body.patientId } });
+    const patient = await prisma.patient.findUnique({
+      where: { id: body.patientId },
+    });
     if (!patient) throw new ApiError(404, "Patient not found");
 
-    const expiryDate = body.expiryDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const expiryDate =
+      body.expiryDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     const { token, qrCode } = await createPrescriptionQr();
 
-    const prescription = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const created = await tx.prescription.create({
-        data: {
-          doctorId: doctor.id,
-          patientId: patient.id,
-          qrCode,
-          qrCodeToken: token,
-          disease: body.disease,
-          issuedDate: new Date(),
-          expiryDate,
-          notes: body.notes,
-          followUpDate: body.followUpDate,
-          items: {
-            create: body.items.map((item) => ({
-              medicineId: item.medicineId,
-              medicineName: item.medicineName,
-              dosage: item.dosage,
-              frequency: item.frequency,
-              durationDays: item.durationDays,
-              timing: item.timing,
-              quantityToTake: item.quantityToTake,
-              instructions: item.instructions,
-            })),
-          },
-          refillAlerts: {
-            create: {
-              patientId: patient.id,
-              doctorId: doctor.id,
-              alertType: "expiry_warning",
-              alertDate: new Date(expiryDate.getTime() - 3 * 24 * 60 * 60 * 1000),
+    const prescription = await prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const created = await tx.prescription.create({
+          data: {
+            doctorId: doctor.id,
+            patientId: patient.id,
+            qrCode,
+            qrCodeToken: token,
+            disease: body.disease,
+            issuedDate: new Date(),
+            expiryDate,
+            notes: body.notes,
+            followUpDate: body.followUpDate,
+            items: {
+              create: body.items.map((item) => ({
+                medicineId: item.medicineId,
+                medicineName: item.medicineName,
+                dosage: item.dosage,
+                frequency: item.frequency,
+                durationDays: item.durationDays,
+                timing: item.timing,
+                quantityToTake: item.quantityToTake,
+                instructions: item.instructions,
+              })),
+            },
+            refillAlerts: {
+              create: {
+                patientId: patient.id,
+                doctorId: doctor.id,
+                alertType: "expiry_warning",
+                alertDate: new Date(
+                  expiryDate.getTime() - 3 * 24 * 60 * 60 * 1000,
+                ),
+              },
             },
           },
-        },
-        include: { items: true, patient: { include: { user: true } } },
-      });
+          include: { items: true, patient: { include: { user: true } } },
+        });
 
-      await tx.notification.create({
-        data: {
-          userId: patient.userId,
-          title: "New prescription issued",
-          message: "A new prescription is available in your patient portal.",
-          type: "prescription",
-        },
-      });
+        await tx.notification.create({
+          data: {
+            userId: patient.userId,
+            title: "New prescription issued",
+            message: "A new prescription is available in your patient portal.",
+            type: "prescription",
+          },
+        });
 
-      return created;
-    });
+        return created;
+      },
+    );
 
     await audit({
       userId: req.user!.id,
@@ -174,7 +197,11 @@ doctorRoutes.get(
     const doctor = await getDoctor(req.user!.id);
     const prescriptions = await prisma.prescription.findMany({
       where: { doctorId: doctor.id },
-      include: { patient: { include: { user: true } }, items: true, dispensedRecord: true },
+      include: {
+        patient: { include: { user: true } },
+        items: true,
+        dispensedRecord: true,
+      },
       orderBy: { createdAt: "desc" },
     });
 

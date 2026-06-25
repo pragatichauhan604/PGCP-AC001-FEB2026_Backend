@@ -3,7 +3,8 @@ export const swaggerSpec = {
   info: {
     title: "DPCS API",
     version: "1.0.0",
-    description: "Digital Prescription and Pharmacy Coordination System backend API.",
+    description:
+      "Digital Prescription and Pharmacy Management  System backend API.",
   },
   servers: [
     {
@@ -66,6 +67,12 @@ export const swaggerSpec = {
           hospitalAddress: { type: "string", example: "Sector 12 Main Road" },
           city: { type: "string", example: "Noida" },
           pincode: { type: "string", example: "201301" },
+          profilePhoto: {
+            type: "string",
+            description:
+              "Optional JPG, PNG, or WebP data URL from the frontend file picker.",
+            example: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
+          },
         },
       },
       PatientRegistration: {
@@ -88,7 +95,11 @@ export const swaggerSpec = {
           password: { type: "string", example: "Patient123" },
           confirmPassword: { type: "string", example: "Patient123" },
           phone: { type: "string", example: "9876543210" },
-          dateOfBirth: { type: "string", format: "date", example: "2000-01-15" },
+          dateOfBirth: {
+            type: "string",
+            format: "date",
+            example: "2000-01-15",
+          },
           gender: { type: "string", example: "male" },
           bloodGroup: { type: "string", example: "O+" },
           address: { type: "string", example: "Sector 15" },
@@ -132,6 +143,13 @@ export const swaggerSpec = {
     },
   },
   paths: {
+    "/health": {
+      get: {
+        tags: ["System"],
+        summary: "Health check",
+        responses: { "200": { description: "API is running" } },
+      },
+    },
     "/api/auth/register/doctor": {
       post: {
         tags: ["Auth"],
@@ -158,7 +176,15 @@ export const swaggerSpec = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["fullName", "email", "password", "confirmPassword", "phone", "pharmacyId", "licenseNumber"],
+                required: [
+                  "fullName",
+                  "email",
+                  "password",
+                  "confirmPassword",
+                  "phone",
+                  "pharmacyId",
+                  "licenseNumber",
+                ],
                 properties: {
                   fullName: { type: "string" },
                   email: { type: "string" },
@@ -191,7 +217,27 @@ export const swaggerSpec = {
         responses: ok("Current user returned"),
       },
     },
-    
+    "/api/catalog/medicines": {
+      get: {
+        tags: ["Catalog"],
+        summary: "Search medicines",
+        security: bearer(),
+        parameters: queryParams([{ name: "q", schema: { type: "string" } }]),
+        responses: ok("Medicine list returned"),
+      },
+    },
+    "/api/catalog/availability": {
+      get: {
+        tags: ["Catalog"],
+        summary: "Medicine availability by pharmacy",
+        security: bearer(),
+        parameters: queryParams([
+          { name: "medicineId", schema: { type: "string" } },
+          { name: "city", schema: { type: "string" } },
+        ]),
+        responses: ok("Inventory availability returned"),
+      },
+    },
     "/api/doctor/dashboard": route("Doctor", "Doctor dashboard"),
     "/api/doctor/patients/search": {
       get: {
@@ -215,6 +261,107 @@ export const swaggerSpec = {
         security: bearer(),
         requestBody: jsonBody("PrescriptionCreate"),
         responses: created("Prescription created"),
+      },
+    },
+    "/api/patient/dashboard": route("Patient", "Patient dashboard"),
+    "/api/patient/prescriptions": route("Patient", "Patient prescriptions"),
+    "/api/patient/prescriptions/{id}/qr": {
+      get: {
+        tags: ["Patient"],
+        summary: "Get prescription QR code",
+        security: bearer(),
+        parameters: pathId(),
+        responses: ok("QR code returned"),
+      },
+    },
+    "/api/patient/prescriptions/{id}/refill-request": {
+      post: {
+        tags: ["Patient"],
+        summary: "Request refill",
+        security: bearer(),
+        parameters: pathId(),
+        responses: created("Refill request created"),
+      },
+    },
+    "/api/pharmacy/prescriptions/scan/{token}": {
+      get: {
+        tags: ["Pharmacy"],
+        summary: "Scan QR token",
+        security: bearer(),
+        parameters: [
+          {
+            name: "token",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          },
+        ],
+        responses: ok("Prescription returned"),
+      },
+    },
+    "/api/pharmacy/prescriptions/{id}/dispense": {
+      post: {
+        tags: ["Pharmacy"],
+        summary: "Mark prescription dispensed",
+        security: bearer(),
+        parameters: pathId(),
+        responses: created("Dispense record created"),
+      },
+    },
+    "/api/pharmacy/inventory": {
+      get: {
+        tags: ["Pharmacy"],
+        summary: "Pharmacy inventory",
+        security: bearer(),
+        responses: ok("Inventory returned"),
+      },
+      post: {
+        tags: ["Pharmacy"],
+        summary: "Add inventory record",
+        security: bearer(),
+        responses: created("Inventory record created"),
+      },
+    },
+    "/api/admin/dashboard": route("Admin", "Admin dashboard"),
+    "/api/admin/doctors": route("Admin", "List doctors"),
+    "/api/admin/doctors/{id}/approval": approvalRoute(
+      "Admin",
+      "Approve or suspend doctor",
+    ),
+    "/api/admin/pharmacies": {
+      get: {
+        tags: ["Admin"],
+        summary: "List pharmacies",
+        security: bearer(),
+        responses: ok("Pharmacies returned"),
+      },
+      post: {
+        tags: ["Admin"],
+        summary: "Create pharmacy",
+        security: bearer(),
+        responses: created("Pharmacy created"),
+      },
+    },
+    "/api/admin/pharmacies/{id}/approval": approvalRoute(
+      "Admin",
+      "Approve or suspend pharmacy",
+    ),
+    "/api/admin/medicines": {
+      post: {
+        tags: ["Admin"],
+        summary: "Add medicine to master list",
+        security: bearer(),
+        responses: created("Medicine created"),
+      },
+    },
+    "/api/notifications": route("Notifications", "User notifications"),
+    "/api/notifications/{id}/read": {
+      patch: {
+        tags: ["Notifications"],
+        summary: "Mark notification as read",
+        security: bearer(),
+        parameters: pathId(),
+        responses: ok("Notification updated"),
       },
     },
   },
@@ -254,7 +401,9 @@ function created(description: string) {
 }
 
 function pathId() {
-  return [{ name: "id", in: "path", required: true, schema: { type: "string" } }];
+  return [
+    { name: "id", in: "path", required: true, schema: { type: "string" } },
+  ];
 }
 
 function queryParams(params: { name: string; schema: { type: string } }[]) {
