@@ -5,6 +5,7 @@ import { authenticate } from "../middleware/auth";
 import { ApiError } from "../middleware/error";
 import { asyncHandler } from "../utils/asyncHandler";
 import {
+  adminRegistrationSchema,
   doctorRegistrationSchema,
   forgotPasswordSchema,
   loginSchema,
@@ -28,6 +29,30 @@ const publicUserSelect = {
   patient: true,
   pharmacist: { include: { pharmacy: true } },
 };
+
+authRoutes.post(
+  "/register/admin",
+  asyncHandler(async (req, res) => {
+    const body = adminRegistrationSchema.parse(req.body);
+    const passwordHash = await hashPassword(body.password);
+
+    const user = await prisma.user.create({
+      data: {
+        fullName: body.fullName,
+        email: body.email.toLowerCase(),
+        passwordHash,
+        phone: body.phone,
+        role: "admin",
+        isActive: true,
+        isVerified: true,
+      },
+      select: publicUserSelect,
+    });
+
+    res.status(201).json({ message: "Admin registered successfully.", user });
+  }),
+);
+
 authRoutes.post(
   "/register/doctor",
   asyncHandler(async (req, res) => {
@@ -56,7 +81,9 @@ authRoutes.post(
       select: publicUserSelect,
     });
 
-    res.status(201).json({ message: "Doctor registered. Admin approval required.", user });
+    res
+      .status(201)
+      .json({ message: "Doctor registered. Admin approval required.", user });
   }),
 );
 
@@ -93,6 +120,7 @@ authRoutes.post(
     res.status(201).json({ message: "Patient registered successfully.", user });
   }),
 );
+
 authRoutes.post(
   "/register/pharmacist",
   asyncHandler(async (req, res) => {
@@ -116,7 +144,10 @@ authRoutes.post(
       select: publicUserSelect,
     });
 
-    res.status(201).json({ message: "Pharmacist registered. Admin approval required.", user });
+    res.status(201).json({
+      message: "Pharmacist registered. Admin approval required.",
+      user,
+    });
   }),
 );
 
@@ -126,7 +157,11 @@ authRoutes.post(
     const body = loginSchema.parse(req.body);
     const user = await prisma.user.findUnique({
       where: { email: body.email.toLowerCase() },
-      include: { doctor: true, patient: true, pharmacist: { include: { pharmacy: true } } },
+      include: {
+        doctor: true,
+        patient: true,
+        pharmacist: { include: { pharmacy: true } },
+      },
     });
 
     if (!user || !(await verifyPassword(body.password, user.passwordHash))) {
@@ -149,8 +184,14 @@ authRoutes.post(
       throw new ApiError(403, "Pharmacist account is pending admin approval");
     }
 
-    await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
-    const token = signToken({ id: user.id, role: user.role, email: user.email }, body.rememberMe);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLogin: new Date() },
+    });
+    const token = signToken(
+      { id: user.id, role: user.role, email: user.email },
+      body.rememberMe,
+    );
     const { passwordHash: _passwordHash, ...safeUser } = user;
 
     res.json({
@@ -158,16 +199,21 @@ authRoutes.post(
       user: safeUser,
       redirectTo: `/${user.role === "pharmacist" ? "pharmacy" : user.role}/dashboard`,
     });
-     }),
+  }),
 );
+
 authRoutes.post(
   "/forgot-password",
   asyncHandler(async (req, res) => {
     const body = forgotPasswordSchema.parse(req.body);
-    const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } });
+    const user = await prisma.user.findUnique({
+      where: { email: body.email.toLowerCase() },
+    });
 
     if (!user) {
-      return res.json({ message: "If the email exists, an OTP has been sent." });
+      return res.json({
+        message: "If the email exists, an OTP has been sent.",
+      });
     }
 
     const otp = String(Math.floor(100000 + Math.random() * 900000));
@@ -190,7 +236,9 @@ authRoutes.post(
   "/reset-password",
   asyncHandler(async (req, res) => {
     const body = resetPasswordSchema.parse(req.body);
-    const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } });
+    const user = await prisma.user.findUnique({
+      where: { email: body.email.toLowerCase() },
+    });
     if (!user) throw new ApiError(400, "Invalid or expired OTP");
 
     const otpRecords = await prisma.passwordResetOtp.findMany({
@@ -228,6 +276,7 @@ authRoutes.post(
     res.json({ message: "Password reset successful." });
   }),
 );
+
 authRoutes.get(
   "/me",
   authenticate,
